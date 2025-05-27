@@ -1,0 +1,506 @@
+import React, { useState, useEffect } from 'react';
+import * as XLSX from 'xlsx';
+import { Search, Upload, Trash2, Copy, FileSpreadsheet, CheckCircle, StickyNote, Download, FileText } from 'lucide-react';
+
+const DebtManagementApp = () => {
+  const [data, setData] = useState([]);
+  const [filteredData, setFilteredData] = useState([]);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [searchType, setSearchType] = useState('bdti');
+  const [currentFile, setCurrentFile] = useState(null);
+  const [copied, setCopied] = useState(false);
+  const [selectedDebtor, setSelectedDebtor] = useState(null);
+  const [notes, setNotes] = useState({});
+  const [showAllNotes, setShowAllNotes] = useState(false);
+
+  // Carica il file iniziale se presente
+  useEffect(() => {
+    loadInitialFile();
+  }, []);
+
+  // Funzione per caricare il file iniziale
+  const loadInitialFile = async () => {
+    try {
+      const response = await window.fs.readFile(' Sosp Giugno 25.xlsx');
+      const workbook = XLSX.read(response);
+      const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+      const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+      
+      // Converti in formato oggetto con chiavi appropriate
+      const formattedData = [];
+      for (let i = 2; i < jsonData.length; i++) {
+        if (jsonData[i][0]) { // Solo righe con dati
+          formattedData.push({
+            nomeConsulente: jsonData[i][0] || '',
+            nomeAreaManager: jsonData[i][1] || '',
+            nomeTeamManager: jsonData[i][2] || '',
+            bdti: jsonData[i][3] || '',
+            ragioneSociale: jsonData[i][4] || '',
+            documento: jsonData[i][5] || '',
+            dataDocumento: jsonData[i][6] || '',
+            dataScadenza: jsonData[i][7] || '',
+            debito: jsonData[i][8] || 0,
+            codPagamento: jsonData[i][9] || '',
+            note: jsonData[i][10] || ''
+          });
+        }
+      }
+      
+      setData(formattedData);
+      setFilteredData(formattedData);
+      setCurrentFile(' Sosp Giugno 25.xlsx');
+    } catch (error) {
+      console.log('Nessun file iniziale trovato');
+    }
+  };
+
+  // Gestione upload file
+  const handleFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const data = new Uint8Array(e.target.result);
+      const workbook = XLSX.read(data);
+      const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+      const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+      
+      // Converti in formato oggetto
+      const formattedData = [];
+      for (let i = 2; i < jsonData.length; i++) {
+        if (jsonData[i][0]) {
+          formattedData.push({
+            nomeConsulente: jsonData[i][0] || '',
+            nomeAreaManager: jsonData[i][1] || '',
+            nomeTeamManager: jsonData[i][2] || '',
+            bdti: jsonData[i][3] || '',
+            ragioneSociale: jsonData[i][4] || '',
+            documento: jsonData[i][5] || '',
+            dataDocumento: jsonData[i][6] || '',
+            dataScadenza: jsonData[i][7] || '',
+            debito: parseFloat(jsonData[i][8]) || 0,
+            codPagamento: jsonData[i][9] || '',
+            note: jsonData[i][10] || ''
+          });
+        }
+      }
+      
+      setData(formattedData);
+      setFilteredData(formattedData);
+      setCurrentFile(file.name);
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  // Funzione di ricerca
+  const handleSearch = () => {
+    if (!searchTerm) {
+      setFilteredData(data);
+      return;
+    }
+
+    const filtered = data.filter(item => {
+      const searchLower = searchTerm.toLowerCase();
+      switch (searchType) {
+        case 'bdti':
+          return item.bdti.toLowerCase().includes(searchLower);
+        case 'ragioneSociale':
+          return item.ragioneSociale.toLowerCase().includes(searchLower);
+        case 'teamManager':
+          return item.nomeTeamManager.toLowerCase().includes(searchLower);
+        default:
+          return false;
+      }
+    });
+
+    setFilteredData(filtered);
+  };
+
+  // Elimina tutti i dati
+  const handleClearData = () => {
+    if (window.confirm('Sei sicuro di voler eliminare tutti i dati del foglio Excel? Le note rimarranno disponibili.')) {
+      setData([]);
+      setFilteredData([]);
+      setCurrentFile(null);
+      setSelectedDebtor(null);
+    }
+  };
+
+  // Salva nota per BDTI
+  const handleNoteChange = (bdti, noteText) => {
+    const updatedNotes = { 
+      ...notes, 
+      [bdti]: {
+        text: noteText,
+        lastModified: new Date().toLocaleString('it-IT', {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit'
+        })
+      }
+    };
+    setNotes(updatedNotes);
+  };
+
+  // Elimina una nota specifica
+  const handleDeleteNote = (bdti) => {
+    if (window.confirm('Sei sicuro di voler eliminare questa nota?')) {
+      const updatedNotes = { ...notes };
+      delete updatedNotes[bdti];
+      setNotes(updatedNotes);
+    }
+  };
+
+  // Esporta note in JSON
+  const exportNotes = () => {
+    const dataStr = JSON.stringify(notes, null, 2);
+    const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+    
+    const exportFileDefaultName = `note_debiti_${new Date().toISOString().slice(0,10)}.json`;
+    
+    const linkElement = document.createElement('a');
+    linkElement.setAttribute('href', dataUri);
+    linkElement.setAttribute('download', exportFileDefaultName);
+    linkElement.click();
+  };
+
+  // Importa note da JSON
+  const handleNotesImport = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const importedNotes = JSON.parse(e.target.result);
+        setNotes(importedNotes);
+        alert('Note importate con successo!');
+      } catch (error) {
+        alert('Errore nell\'importazione del file. Assicurati che sia un file JSON valido.');
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  // Genera testo WhatsApp
+  const generateWhatsAppText = (debtor) => {
+    // Raggruppa tutti i documenti per questo BDTI
+    const allDocuments = data.filter(item => item.bdti === debtor.bdti);
+    const totalDebt = allDocuments.reduce((sum, item) => sum + (parseFloat(item.debito) || 0), 0);
+    
+    let text = `Ciao l'amministrazione ti ha scritto in merito all'insoluto una mail con il dettaglio del dovuto\n\n`;
+    text += `*Cliente:* ${debtor.ragioneSociale}\n`;
+    text += `*Codice BDTI:* ${debtor.bdti}\n`;
+    text += `*Dettaglio documenti scaduti:*\n`;
+    
+    allDocuments.forEach(doc => {
+      text += `• Doc. ${doc.documento} del ${doc.dataDocumento} - € ${doc.debito.toFixed(2)}\n`;
+    });
+    
+    text += `\n*TOTALE DEBITO: € ${totalDebt.toFixed(2)}*\n\n`;
+    text += `mi fai sapere come regolarci per il saldo!! Se non mi dai riscontro a breve scatta la sospensione definitiva.`;
+    
+    return text;
+  };
+
+  // Copia testo WhatsApp
+  const copyToClipboard = (debtor) => {
+    const text = generateWhatsAppText(debtor);
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setSelectedDebtor(debtor.bdti);
+      setTimeout(() => {
+        setCopied(false);
+        setSelectedDebtor(null);
+      }, 2000);
+    });
+  };
+
+  // Raggruppa i dati per BDTI per mostrare il totale
+  const groupedData = filteredData.reduce((acc, item) => {
+    if (!acc[item.bdti]) {
+      acc[item.bdti] = {
+        ...item,
+        documents: [],
+        totalDebt: 0
+      };
+    }
+    acc[item.bdti].documents.push(item);
+    acc[item.bdti].totalDebt += parseFloat(item.debito) || 0;
+    return acc;
+  }, {});
+
+  return (
+    <div className="min-h-screen bg-gray-100 p-4">
+      <div className="max-w-7xl mx-auto">
+        {/* Header */}
+        <div className="bg-white rounded-lg shadow-md p-6 mb-6">
+          <h1 className="text-3xl font-bold text-gray-800 mb-4">
+            Gestione Solleciti Debiti
+          </h1>
+          
+          {/* File Management */}
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center space-x-4">
+              <label className="flex items-center space-x-2 bg-blue-500 text-white px-4 py-2 rounded-lg cursor-pointer hover:bg-blue-600 transition">
+                <Upload className="w-5 h-5" />
+                <span>Carica Excel</span>
+                <input
+                  type="file"
+                  accept=".xlsx,.xls"
+                  onChange={handleFileUpload}
+                  className="hidden"
+                />
+              </label>
+              
+              {currentFile && (
+                <>
+                  <div className="flex items-center space-x-2 text-gray-600">
+                    <FileSpreadsheet className="w-5 h-5" />
+                    <span>{currentFile}</span>
+                  </div>
+                  
+                  <button
+                    onClick={handleClearData}
+                    className="flex items-center space-x-2 bg-red-500 text-white px-4 py-2 rounded-lg hover:bg-red-600 transition"
+                  >
+                    <Trash2 className="w-5 h-5" />
+                    <span>Elimina Dati</span>
+                  </button>
+                </>
+              )}
+            </div>
+            
+            {Object.keys(notes).filter(key => notes[key]?.text).length > 0 && (
+              <div className="flex items-center space-x-2">
+                <div className="flex items-center space-x-2 text-gray-600 bg-green-50 px-4 py-2 rounded-lg">
+                  <StickyNote className="w-5 h-5 text-green-600" />
+                  <span className="text-sm font-medium">
+                    {Object.keys(notes).filter(key => notes[key]?.text).length} note salvate
+                  </span>
+                </div>
+                <button
+                  onClick={() => setShowAllNotes(!showAllNotes)}
+                  className="text-sm text-blue-600 hover:text-blue-800 underline"
+                >
+                  {showAllNotes ? 'Nascondi archivio' : 'Vedi tutte'}
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Search */}
+          <div className="flex space-x-4">
+            <select
+              value={searchType}
+              onChange={(e) => setSearchType(e.target.value)}
+              className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="bdti">BDTI</option>
+              <option value="ragioneSociale">Ragione Sociale</option>
+              <option value="teamManager">Team Manager</option>
+            </select>
+            
+            <div className="flex-1 relative">
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
+                placeholder="Cerca..."
+                className="w-full px-4 py-2 pr-10 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <button
+                onClick={handleSearch}
+                className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700"
+              >
+                <Search className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Archivio Note */}
+        {showAllNotes && (
+          <div className="bg-white rounded-lg shadow-md p-6 mb-6">
+            <div className="flex justify-between items-start mb-4">
+              <div>
+                <h2 className="text-xl font-bold text-gray-800 mb-2">📝 Archivio Note</h2>
+                <p className="text-sm text-gray-600">
+                  Le note sono legate al codice BDTI e rimangono anche se cambi Excel. Esporta per salvarle permanentemente.
+                </p>
+              </div>
+              <div className="flex space-x-2">
+                <button
+                  onClick={exportNotes}
+                  className="flex items-center space-x-2 bg-green-500 text-white px-3 py-2 rounded-lg hover:bg-green-600 transition text-sm"
+                  disabled={Object.keys(notes).filter(key => notes[key]?.text).length === 0}
+                >
+                  <Download className="w-4 h-4" />
+                  <span>Esporta</span>
+                </button>
+                <label className="flex items-center space-x-2 bg-blue-500 text-white px-3 py-2 rounded-lg cursor-pointer hover:bg-blue-600 transition text-sm">
+                  <FileText className="w-4 h-4" />
+                  <span>Importa</span>
+                  <input
+                    type="file"
+                    accept=".json"
+                    onChange={handleNotesImport}
+                    className="hidden"
+                  />
+                </label>
+              </div>
+            </div>
+            <div className="space-y-3">
+              {Object.entries(notes)
+                .filter(([_, note]) => note?.text)
+                .sort((a, b) => {
+                  // Ordina per data più recente
+                  const dateA = new Date(a[1].lastModified || 0);
+                  const dateB = new Date(b[1].lastModified || 0);
+                  return dateB - dateA;
+                })
+                .map(([bdti, note]) => {
+                  const isActive = data.some(item => item.bdti === bdti);
+                  const clientData = data.find(item => item.bdti === bdti);
+                  return (
+                    <div 
+                      key={bdti} 
+                      className={`p-4 rounded-lg border ${
+                        isActive ? 'bg-green-50 border-green-300' : 'bg-gray-50 border-gray-300'
+                      }`}
+                    >
+                      <div className="flex justify-between items-start mb-2">
+                        <div>
+                          <span className="font-semibold text-gray-800">BDTI: {bdti}</span>
+                          {clientData && (
+                            <span className="ml-2 text-sm text-gray-600">
+                              - {clientData.ragioneSociale}
+                            </span>
+                          )}
+                          {isActive && (
+                            <span className="ml-2 text-xs bg-green-500 text-white px-2 py-1 rounded">
+                              Attivo
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <span className="text-xs text-gray-500">{note.lastModified}</span>
+                          <button
+                            onClick={() => handleDeleteNote(bdti)}
+                            className="text-red-500 hover:text-red-700"
+                            title="Elimina nota"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                      <p className="text-gray-700 whitespace-pre-wrap">{note.text}</p>
+                    </div>
+                  );
+                })}
+            </div>
+            {Object.keys(notes).filter(key => notes[key]?.text).length === 0 && (
+              <p className="text-gray-500 text-center">Nessuna nota archiviata</p>
+            )}
+          </div>
+        )}
+
+        {/* Results */}
+        {Object.keys(groupedData).length > 0 ? (
+          <div className="space-y-4">
+            {Object.values(groupedData).map((group) => (
+              <div key={group.bdti} className="bg-white rounded-lg shadow-md p-6">
+                <div className="flex justify-between items-start mb-4">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-xl font-semibold text-gray-800">
+                        {group.ragioneSociale}
+                      </h2>
+                      {notes[group.bdti]?.text && (
+                        <div className="flex items-center text-green-600" title="Nota presente">
+                          <StickyNote className="w-4 h-4" />
+                        </div>
+                      )}
+                    </div>
+                    <p className="text-gray-600">BDTI: {group.bdti}</p>
+                    <p className="text-gray-600">Team Manager: {group.nomeTeamManager}</p>
+                  </div>
+                  
+                  <div className="text-right">
+                    <p className="text-2xl font-bold text-red-600">
+                      € {group.totalDebt.toFixed(2)}
+                    </p>
+                    <button
+                      onClick={() => copyToClipboard(group)}
+                      className={`mt-2 flex items-center space-x-2 px-4 py-2 rounded-lg transition ${
+                        selectedDebtor === group.bdti && copied
+                          ? 'bg-green-500 text-white'
+                          : 'bg-gray-200 hover:bg-gray-300 text-gray-700'
+                      }`}
+                    >
+                      {selectedDebtor === group.bdti && copied ? (
+                        <>
+                          <CheckCircle className="w-5 h-5" />
+                          <span>Copiato!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-5 h-5" />
+                          <span>Copia per WhatsApp</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+                
+                <div className="border-t pt-4">
+                  <h3 className="font-semibold text-gray-700 mb-2">Documenti:</h3>
+                  <div className="space-y-2">
+                    {group.documents.map((doc, idx) => (
+                      <div key={idx} className="flex justify-between text-sm text-gray-600">
+                        <span>Doc. {doc.documento} del {doc.dataDocumento}</span>
+                        <span className="font-medium">€ {doc.debito.toFixed(2)}</span>
+                      </div>
+                    ))}
+                  </div>
+                  
+                  <div className="mt-4">
+                    <div className="flex justify-between items-center mb-2">
+                      <h3 className="font-semibold text-gray-700">Note / Risposta cliente:</h3>
+                      {notes[group.bdti]?.lastModified && (
+                        <span className="text-xs text-gray-500">
+                          Ultima modifica: {notes[group.bdti].lastModified}
+                        </span>
+                      )}
+                    </div>
+                    <textarea
+                      value={notes[group.bdti]?.text || ''}
+                      onChange={(e) => handleNoteChange(group.bdti, e.target.value)}
+                      placeholder="Inserisci qui la risposta del cliente..."
+                      className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                      rows="3"
+                    />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="bg-white rounded-lg shadow-md p-12 text-center">
+            <p className="text-gray-500 text-lg">
+              {data.length === 0 
+                ? 'Carica un file Excel per iniziare'
+                : 'Nessun risultato trovato per la ricerca'}
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default DebtManagementApp;
